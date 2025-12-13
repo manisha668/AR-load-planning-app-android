@@ -1,0 +1,60 @@
+// app/build.gradle (module)
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+
+android {
+    namespace "com.google.ar.core.examples.kotlin.helloar"
+    compileSdkVersion 36
+
+    defaultConfig {
+        applicationId "com.google.ar.core.examples.kotlin.helloar"
+
+        // AR Optional apps must declare minSdkVersion >= 14.
+        // AR Required apps must declare minSdkVersion >= 24.
+        minSdkVersion 24
+        targetSdkVersion 36
+        versionCode 1
+        versionName '1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+        // optional: enable inline classes / other flags:
+        // freeCompilerArgs += ["-Xjvm-default=compatibility"]
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+dependencies {
+    // ARCore (Google Play Services for AR) library — kept your chosen version
+    implementation 'com.google.ar:core:1.51.0'
+
+    // OBJ loader
+    implementation 'de.javagl:obj:0.4.0'
+
+    // AndroidX + Material
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.lifecycle:lifecycle-common-java8:2.6.1'
+    implementation 'com.google.android.material:material:1.9.0'
+
+    // Kotlin stdlib (explicit version to match Kotlin Gradle plugin below)
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.8.21"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.21"
+
+    // Sceneform (optional UX helper). Keep if you need ArFragment and easy node placement.
+    implementation 'com.google.ar.sceneform:core:1.17.1'
+    implementation 'com.google.ar.sceneform.ux:sceneform-ux:1.17.1'
+    implementation 'com.google.android.gms:play-services-location:21.0.1'
+
+}

@@ -1,0 +1,32 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+buildscript {
+    // Use Kotlin 1.8.21 so library metadata (lifecycle 2.6.1 etc.) is compatible.
+    ext.kotlin_version = '1.8.21'
+
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // You already had AGP 8.4.0 — keep it if you want (AGP 8.4.0 works with Gradle 8.x).
+        classpath 'com.android.tools.build:gradle:8.4.0'
+
+        // Kotlin Gradle plugin must match ext.kotlin_version
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+
+        // NOTE: Do not place your application dependencies here; they belong
+        // in the individual module build.gradle files
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        mavenLocal()
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

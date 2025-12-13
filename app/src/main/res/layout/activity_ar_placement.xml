@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#111">
+
+    <!-- Input section -->
+    <LinearLayout
+        android:id="@+id/inputPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:background="#222"
+        android:elevation="6dp">
+
+        <EditText
+            android:id="@+id/editExpected"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Enter expected rects (x,y,w,h)"
+            android:inputType="text"
+            android:textColor="@android:color/white"
+            android:background="#333"
+            android:padding="10dp" />
+
+        <EditText
+            android:id="@+id/editPlaced"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Enter placed rects (x,y,w,h)"
+            android:inputType="text"
+            android:textColor="@android:color/white"
+            android:background="#333"
+            android:padding="10dp"
+            android:layout_marginTop="8dp" />
+
+        <Button
+            android:id="@+id/btnEvaluate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Evaluate"
+            android:textAllCaps="false"
+            android:layout_marginTop="12dp"
+            android:padding="10dp" />
+
+    </LinearLayout>
+
+    <!-- Overlay visualization -->
+    <com.google.ar.core.examples.kotlin.helloar.OverlayView
+        android:id="@+id/overlayView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginTop="140dp"/>
+</FrameLayout>

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root_frame"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+  <!-- Use the fully-qualified class name for GLSurfaceView so layout editor can resolve it -->
+  <android.opengl.GLSurfaceView
+      android:id="@+id/surfaceview"
+      android:layout_width="match_parent"
+      android:layout_height="match_parent" />
+
+  <!-- Optional overlay view (your custom view class). Keep the full package path. -->
+  <com.google.ar.core.examples.kotlin.helloar.OverlayView
+      android:id="@+id/overlayView"
+      android:layout_width="match_parent"
+      android:layout_height="match_parent" />
+
+  <!-- Top panel for latitude/longitude inputs -->
+  <LinearLayout
+      android:id="@+id/topPanel"
+      android:orientation="horizontal"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:padding="8dp"
+      android:background="#88000000"
+      android:layout_gravity="top">
+
+    <EditText
+        android:id="@+id/editLat"
+        android:layout_width="0dp"
+        android:layout_weight="1"
+        android:layout_height="wrap_content"
+        android:hint="@string/hint_latitude"
+        android:inputType="numberDecimal|numberSigned"
+        android:textColor="@android:color/white"
+        android:background="@android:color/transparent"
+        android:padding="8dp" />
+
+    <EditText
+        android:id="@+id/editLon"
+        android:layout_width="0dp"
+        android:layout_weight="1"
+        android:layout_height="wrap_content"
+        android:hint="@string/hint_longitude"
+        android:inputType="numberDecimal|numberSigned"
+        android:textColor="@android:color/white"
+        android:background="@android:color/transparent"
+        android:padding="8dp"
+        android:layout_marginStart="8dp" />
+
+    <Button
+        android:id="@+id/btnSubmitCoords"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/button_submit" />
+  </LinearLayout>
+
+  <!-- Settings button used in HelloArView -->
+  <ImageButton
+      android:id="@+id/settings_button"
+      android:layout_width="48dp"
+      android:layout_height="48dp"
+      android:layout_margin="12dp"
+      android:layout_gravity="bottom|end"
+      android:contentDescription="@string/settings"
+      android:src="@android:drawable/ic_menu_manage"
+      android:background="?attr/selectableItemBackgroundBorderless" />
+
+</FrameLayout>

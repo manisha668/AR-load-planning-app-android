@@ -1,0 +1,19 @@
+# Sample Loading Plan for Aircraft Load Planning
+# Format: ContainerID=X, Weight=Y, Position=Z
+#
+# This file defines the expected container placements for a cargo flight.
+# Each line represents one container with its ID, weight (in kg), and ramp position.
+#
+# Ramp positions format: [Row Number][L/R]
+#   - Row number: 1, 2, 3, 4, etc. (front to back)
+#   - Side: L (left) or R (right)
+#
+# Examples: 1L, 2R, 3L, 4R
+
+# Expected container placements
+ContainerID=AKE123, Weight=4800, Position=2R
+ContainerID=AKE456, Weight=3000, Position=1L
+ContainerID=AKE789, Weight=3500, Position=3L
+ContainerID=PMC001, Weight=4200, Position=2L
+ContainerID=PMC002, Weight=2800, Position=1R
+ContainerID=AKE999, Weight=4000, Position=4L

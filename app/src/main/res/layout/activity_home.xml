@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#F4F6F8"
+    android:gravity="center"
+    android:padding="24dp">
+
+    <!-- App Title -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="AR Load Planning"
+        android:textSize="26sp"
+        android:textStyle="bold"
+        android:textColor="#1A237E"
+        android:layout_marginBottom="8dp"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Aircraft Load and Balance System"
+        android:textSize="14sp"
+        android:textColor="#555555"
+        android:layout_marginBottom="40dp"/>
+
+    <!-- Aircraft Selection -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Select Aircraft Type"
+        android:textSize="14sp"
+        android:textColor="#333333"
+        android:layout_marginBottom="8dp"/>
+
+    <Spinner
+        android:id="@+id/spinnerAircraft"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:background="@android:drawable/edit_text"
+        android:padding="12dp"
+        android:layout_marginBottom="24dp"/>
+    <!-- Upload Button -->
+    <Button
+        android:id="@+id/btnUpload"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="Upload Load Sheet"
+        android:textSize="16sp"
+        android:textAllCaps="false"
+        android:backgroundTint="#3949AB"
+        android:textColor="#FFFFFF"
+        android:layout_marginBottom="20dp"/>
+
+    <!-- AR View Button -->
+    <Button
+        android:id="@+id/btnARView"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="Start AR View"
+        android:textSize="16sp"
+        android:textAllCaps="false"
+        android:backgroundTint="#00897B"
+        android:textColor="#FFFFFF"/>
+
+</LinearLayout>

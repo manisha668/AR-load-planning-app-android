@@ -16,7 +16,7 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.google.ar.core.examples.java.helloar">
+    >
 
   <uses-permission android:name="android.permission.CAMERA"/>
   <!-- Required to post notifications for Android T+ devices -->
@@ -41,10 +41,10 @@
       tools:ignore="GoogleAppIndexingWarning">
 
     <activity
-      android:name=".HelloArActivity"
-      android:screenOrientation="portrait"
-      android:configChanges="orientation|screenSize"
-      android:exported="false" />
+        android:name=".BoardScanActivity"
+        android:screenOrientation="portrait"
+        android:configChanges="orientation|screenSize"
+        android:exported="false" />
     <activity
         android:name=".HomeActivity"
         android:exported="true"

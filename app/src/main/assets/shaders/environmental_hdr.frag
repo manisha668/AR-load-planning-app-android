@@ -61,8 +61,8 @@ uniform vec4 u_ViewLightDirection;
 // The coefficients for the spherical harmonic function which models the diffuse
 // irradiance of a distant environmental light for a given surface normal in
 // world space. These coefficients must be premultiplied with their
-// corresponding spherical harmonics constants. See
-// HelloArActivity.updateSphericalHarmonicsCoefficients for more information.
+
+// corresponding spherical harmonics constants.
 uniform vec3 u_SphericalHarmonicsCoefficients[9];
 
 // The filtered cubemap texture which models the LD term (i.e. radiance (L)
@@ -133,8 +133,7 @@ vec3 Pbr_CalculateMainLightRadiance(const ShadingParameters shading,
 
 vec3 Pbr_CalculateDiffuseEnvironmentalRadiance(const vec3 normal,
                                                const vec3 coefficients[9]) {
-  // See HelloArActivity.updateSphericalHarmonicsCoefficients() for more
-  // information about this calculation.
+  // Diffuse irradiance from spherical harmonics coefficients.
   vec3 radiance = coefficients[0] + coefficients[1] * (normal.y) +
                   coefficients[2] * (normal.z) + coefficients[3] * (normal.x) +
                   coefficients[4] * (normal.y * normal.x) +
@@ -166,7 +165,7 @@ vec3 Pbr_CalculateEnvironmentalRadiance(
     const ShadingParameters shading, const MaterialParameters material,
     const vec3 sphericalHarmonicsCoefficients[9], const samplerCube cubemap) {
   // The lambertian diffuse BRDF term (1/pi) is baked into
-  // HelloArActivity.sphericalHarmonicsFactors.
+  // the spherical harmonics factors.
   vec3 diffuseTerm =
       Pbr_CalculateDiffuseEnvironmentalRadiance(
           shading.worldNormalDirection, sphericalHarmonicsCoefficients) *

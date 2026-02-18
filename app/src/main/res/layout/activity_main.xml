@@ -17,7 +17,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context="com.google.ar.core.examples.java.helloar.HelloArActivity">
+    tools:context="com.google.ar.core.examples.java.helloar.BoardScanActivity">
 
   <android.opengl.GLSurfaceView
       android:id="@+id/surfaceview"
@@ -29,6 +29,14 @@
       android:id="@+id/overlay_container"
       android:layout_width="match_parent"
       android:layout_height="match_parent">
+
+    <!-- Full-screen overlay for detected position boxes (grey/green/red). -->
+    <com.google.ar.core.examples.java.helloar.PositionOverlayView
+        android:id="@+id/position_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clickable="true"
+        android:focusable="true" />
 
     <!-- Top red warning banner, hidden by default. -->
     <TextView
@@ -44,6 +52,19 @@
         android:text="Warning: Mismatch detected – move ULD."
         android:visibility="gone" />
 
+    <Button
+        android:id="@+id/btnSkip"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:layout_alignParentTop="true"
+        android:layout_alignParentEnd="true"
+        android:layout_marginTop="18dp"
+        android:layout_marginEnd="16dp"
+        android:text="Skip"
+        android:textAllCaps="false"
+        android:backgroundTint="#546E7A"
+        android:textColor="#FFFFFF" />
+
     <!-- Bottom info box, summarizing the last placement check. -->
     <TextView
         android:id="@+id/placement_info_box"
@@ -55,7 +76,7 @@
         android:background="@drawable/bg_info_card"
         android:textColor="@android:color/white"
         android:textSize="14sp"
-        android:text="Tap on a container to check placement"
+        android:text="Upload a load sheet, then tap a position box"
         android:gravity="center_horizontal" />
 
   </RelativeLayout>

@@ -25,22 +25,14 @@
         android:textColor="#555555"
         android:layout_marginBottom="40dp"/>
 
-    <!-- Aircraft Selection -->
     <TextView
+        android:id="@+id/tvLoadSheetStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Select Aircraft Type"
+        android:text="Load sheet: not uploaded"
         android:textSize="14sp"
         android:textColor="#333333"
-        android:layout_marginBottom="8dp"/>
-
-    <Spinner
-        android:id="@+id/spinnerAircraft"
-        android:layout_width="match_parent"
-        android:layout_height="50dp"
-        android:background="@android:drawable/edit_text"
-        android:padding="12dp"
-        android:layout_marginBottom="24dp"/>
+        android:layout_marginBottom="16dp"/>
     <!-- Upload Button -->
     <Button
         android:id="@+id/btnUpload"
@@ -58,7 +50,7 @@
         android:id="@+id/btnARView"
         android:layout_width="match_parent"
         android:layout_height="56dp"
-        android:text="Start AR View"
+        android:text="Start Scan"
         android:textSize="16sp"
         android:textAllCaps="false"
         android:backgroundTint="#00897B"

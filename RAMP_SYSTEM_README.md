@@ -1,279 +1,69 @@
-# AR Load Planning - Ramp Position System
+# AR Load Planning - Board Scan Validation
 
 ## Overview
 
-This AR application combines **ARCore camera coordinates** with **operational ramp positions** to validate container placement on aircraft ramps.
+This app validates container placement using a **physical whiteboard/chart** (with handwritten position labels like `1L`, `12R`, `13R`) and a **load sheet** uploaded by the user.
 
-**Key Concept**: Coordinates are the input; ramp positions (like "2R", "4L") are the operational output.
-
----
-
-## Architecture
-
-### Workflow
-```
-ARCore World Coordinates 
-    ↓
-Ramp-Local Coordinates (relative to ramp anchor)
-    ↓
-Normalized Coordinates (0 to 1 range)
-    ↓
-Logical Ramp Positions (e.g., "2R", "4L")
-    ↓
-Load Validation (weight & position checks)
-    ↓
-AR Visualization (green = OK, red = invalid)
-```
+**No aircraft grid and no predefined layout are used.** Only the position labels visible in the camera view become tappable slots.
 
 ---
 
-## Core Components
+## Required User Flow (Implemented)
 
-### 1. **AircraftConfig.java**
-Defines aircraft types with their specifications:
-- Ramp dimensions (width & length in meters)
-- Total number of rows
-- Weight limits per position
+### 1) User prepares the scene
+- Place a **whiteboard/chart paper** in front of the camera.
+- Write clear position labels (examples: `1L`, `1R`, `12R`, `13R`).
 
-**Available Aircraft Types:**
-- `AIRCRAFT_A`: 8m × 20m, 4 rows
-- `AIRCRAFT_B`: 10m × 25m, 5 rows  
-- `BOEING_737`: 6m × 15m, 3 rows
+### 2) Upload load sheet (FIRST step)
+- In `HomeActivity`, the user uploads a load sheet as **PDF / image / text**.
+- The app extracts load-sheet text (OCR for PDF/image) and parses dynamic instructions:
+  - **Container ID** (e.g. `ULD-12`, `AKE123`)
+  - **Expected Position** (e.g. `12R`)
 
-### 2. **RampCoordinateConverter.java**
-Converts between coordinate systems:
-- **World → Ramp-local**: Translates ARCore world coordinates to ramp-relative coordinates
-- **Ramp-local → Normalized**: Scales coordinates to 0-1 range
-- **Normalized → Ramp Position**: Converts to logical position (e.g., "2R")
-- **Ramp Position → World**: Reverse conversion for visualization
+### 3) Camera scans the board continuously
+- In `BoardScanActivity`, live camera frames are processed with ML Kit text recognition.
+- Detected tokens are validated as position codes (format: `\\d{1,3}[LR]`).
 
-**Coordinate Mapping:**
-- **X axis**: Left ↔ Right on the ramp
-  - Normalized X < 0.5 → Left (L)
-  - Normalized X ≥ 0.5 → Right (R)
-- **Z axis**: Front ↔ Back (row direction)
-  - Normalized Z determines row number (1 to N)
-- **Y axis**: Height (not used for position logic)
+### 4) Grey boxes appear on detected positions
+- For each detected position label, a **grey box** is drawn at the detected label location.
+- The box displays the detected label text (e.g. `12R`).
 
-### 3. **RampPosition.java**
-Represents logical ramp positions:
-- Format: `[Row][Side]` (e.g., "2R", "4L")
-- `fromNormalized()`: Creates position from normalized coordinates
-- `asCode()`: Returns position string
+### 5) User taps a grey box
+- The user taps directly on a grey box.
+- The app identifies which position code was tapped.
 
-### 4. **LoadingPlan.java**
-Stores expected container placements:
-- Maps container IDs to expected positions and weights
-- Stores weight limits per ramp position
-- Can be populated from text files or hardcoded
+### 6) Validation happens
+- The tapped position is compared with the **current instruction** from the uploaded load sheet.
+- If correct:
+  - tapped box turns **green**
+- If wrong:
+  - tapped box turns **red**
+  - the **expected position** is shown in the on-screen feedback
 
-### 5. **LoadingPlanParser.java**
-Parses loading plan text files:
-- Format: `ContainerID=X, Weight=Y, Position=Z`
-- Supports comments (lines starting with #)
-- Can load from assets, files, or streams
-
-### 6. **PlacementEvaluator.java**
-Validates container placement:
-- Checks if position matches expected plan
-- Verifies weight is within position limits
-- Suggests better positions if invalid
-- Tracks ramp occupancy
-
----
-
-## Usage Flow
-
-### 1. Aircraft Selection (HomeActivity)
-User selects aircraft type from dropdown:
-```java
-// Aircraft type is passed to HelloArActivity
-intent.putExtra("AIRCRAFT_TYPE", selectedAircraftType.name());
-```
-
-### 2. Configuration Setup (HelloArActivity.onCreate)
-```java
-// Get aircraft configuration
-aircraftConfig = AircraftConfig.getConfig(aircraftType);
-
-// Load and configure loading plan
-loadingPlan = LoadingPlan.createDemoPlan();
-aircraftConfig.applyWeightLimitsTo(loadingPlan);
-
-// Create placement evaluator
-placementEvaluator = new PlacementEvaluator(
-    loadingPlan, 
-    aircraftConfig.getTotalRows()
-);
-```
-
-### 3. Ramp Anchor Establishment
-When first plane is detected:
-```java
-rampAnchor = session.createAnchor(plane.getCenterPose());
-
-// Create coordinate converter
-coordinateConverter = new RampCoordinateConverter(
-    rampAnchor,
-    aircraftConfig.getRampWidthMeters(),
-    aircraftConfig.getRampLengthMeters(),
-    aircraftConfig.getTotalRows()
-);
-```
-
-### 4. Container Placement (on user tap)
-```java
-// 1. Get tap position in world coordinates
-Pose hitPose = hit.getHitPose();
-
-// 2. Convert to ramp position
-RampPosition rampPosition = 
-    coordinateConverter.worldPoseToRampPosition(hitPose);
-
-// 3. Evaluate placement
-PlacementEvaluator.Result result = 
-    placementEvaluator.evaluate(containerId, weight, rampPosition);
-
-// 4. Show visual feedback (green/red)
-if (result.overallOk) {
-    // Show green indicator
-} else {
-    // Show red indicator + suggestion
-}
-```
-
----
-
-## Loading Plan File Format
-
-**Location**: `app/src/main/assets/sample_loading_plan.txt`
-
-**Format**:
-```
-# Comments start with #
-ContainerID=AKE123, Weight=4800, Position=2R
-ContainerID=AKE456, Weight=3000, Position=1L
-ContainerID=AKE789, Weight=3500, Position=3L
-```
-
-**Fields**:
-- `ContainerID`: Unique container identifier
-- `Weight`: Container weight in kilograms
-- `Position`: Ramp position code (e.g., "2R" = Row 2, Right side)
-
----
-
-## Validation Logic
-
-### Position Matching
-- Compares actual position with expected position from plan
-- Result: `positionMatchesPlan` (boolean)
-
-### Weight Validation
-- Checks if container weight ≤ position's maximum allowed weight
-- Result: `withinWeightLimit` (boolean)
-
-### Placement Suggestion
-If placement is invalid:
-1. Find all empty ramp positions
-2. Filter positions where `maxWeight ≥ containerWeight`
-3. Choose nearest valid position (by row distance + side mismatch)
-4. Visualize suggestion in AR
-
----
-
-## AR Visualization
-
-**Color Coding**:
-- **Green**: Correct placement (position matches plan + weight OK)
-- **Red**: Invalid placement (wrong position or overweight)
-
-**Information Display**:
-- Container ID
-- Actual ramp position
-- Expected position (if different)
-- Suggested position (if placement invalid)
-- Reason for invalidity (e.g., "Overweight")
-
----
-
-## Future Enhancements
-
-### ML Integration (Optional)
-- Container detection via camera
-- Barcode/label reading for container ID
-- Weight estimation from visual markers
-
-### Advanced Features
-- CSV/database loading plan support
-- Dynamic ramp configuration
-- Multi-container visualization
-- Load balancing calculations
-- Real-time weight adjustment
-
-### UI Improvements
-- File picker for loading plan upload
-- Aircraft configuration editor
-- Historical placement tracking
-- Export validation reports
-
----
-
-## Testing
-
-### Manual Testing Steps
-1. Select aircraft type in HomeActivity
-2. Start AR View
-3. Point camera at horizontal surface
-4. Wait for plane detection and ramp anchor establishment
-5. Tap on surface to place virtual containers
-6. Observe:
-   - Ramp position calculation (logged)
-   - Placement validation (green/red feedback)
-   - Suggested positions (if invalid)
-
-### Sample Scenarios
-- **Valid Placement**: Place AKE123 at position 2R (should be green)
-- **Invalid Position**: Place AKE123 at position 1L (should be red, suggest 2R)
-- **Overweight**: Place heavy container at position with low weight limit
+### 7) Feedback + advance
+- The app shows **Correct/Wrong** + **Expected Position**.
+- The instruction advances to the next container until all are processed.
 
 ---
 
 ## Key Files
 
-- `AircraftConfig.java` - Aircraft specifications
-- `RampCoordinateConverter.java` - Coordinate transformations
-- `RampPosition.java` - Logical position representation
-- `LoadingPlan.java` - Expected placements
-- `LoadingPlanParser.java` - File parsing
-- `PlacementEvaluator.java` - Validation logic
-- `HelloArActivity.java` - Main AR activity (integration)
-- `HomeActivity.java` - Aircraft selection UI
+- `app/src/main/java/.../helloar/HomeActivity.java`
+  - File picker upload for PDF/image/text
+  - OCR + parsing into dynamic instructions
+- `app/src/main/java/.../helloar/LoadSheetInstructionParser.java`
+  - Extracts `(containerId, expectedPosition)` from load-sheet text
+- `app/src/main/java/.../helloar/BoardScanActivity.java`
+  - Live OCR scanning of the board + instruction validation
+- `app/src/main/java/.../helloar/PositionOverlayView.java`
+  - Draws grey/green/red tappable position boxes
+- `app/src/main/res/layout/activity_main.xml`
+  - Hosts camera surface + overlay view + feedback banner
 
 ---
 
-## Troubleshooting
+## Notes / Limits
 
-### Issue: Ramp anchor not established
-- **Cause**: No planes detected
-- **Solution**: Move camera to scan horizontal surfaces
+- PDF OCR processes up to the first 10 pages (stops early when instructions are found).
+- Position code format supported: `1L`, `12R`, `103L` (1–3 digits + `L`/`R`).
 
-### Issue: Wrong ramp positions detected
-- **Cause**: Incorrect aircraft dimensions or ramp anchor position
-- **Solution**: Verify aircraft config, ensure anchor is at ramp center
-
-### Issue: All placements show as invalid
-- **Cause**: Loading plan doesn't match selected aircraft
-- **Solution**: Update loading plan for correct aircraft type
-
----
-
-## Academic Context
-
-This system demonstrates:
-1. **Coordinate System Transformation**: World → Local → Normalized → Logical
-2. **Rule-Based Validation**: Position and weight constraints
-3. **Spatial Reasoning**: Distance calculations for suggestions
-4. **AR Visualization**: Real-time feedback overlay
-
-**No ML required** for core logic - pure deterministic coordinate math and rules.

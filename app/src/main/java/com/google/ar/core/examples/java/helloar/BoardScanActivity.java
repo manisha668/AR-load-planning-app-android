@@ -27,6 +27,9 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.text.SpannableString;
+import android.text.style.AlignmentSpan;
+import android.text.Layout;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -107,7 +110,7 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
   private TextView placementInfoBox;
   private TextView globalWarningBanner;
   private PositionOverlayView positionOverlayView;
-  private Button btnSkip;
+  private Button btnInstructions;
 
   // Highlight handling: show red/green briefly then clear.
   private static final long HIGHLIGHT_CLEAR_DELAY_MS = 900;
@@ -183,15 +186,16 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
     placementInfoBox = findViewById(R.id.placement_info_box);
     globalWarningBanner = findViewById(R.id.global_warning_banner);
     positionOverlayView = findViewById(R.id.position_overlay);
-    btnSkip = findViewById(R.id.btnSkip);
 
     positionOverlayView.setOnPositionTappedListener(this::onPositionTapped);
-    if (btnSkip != null) {
-      btnSkip.setOnClickListener(v -> skipCurrentInstruction());
+    btnInstructions = findViewById(R.id.btnInstructions);
+    if (btnInstructions != null) {
+      btnInstructions.setOnClickListener(v -> showInstructionsDialog(
+              currentContainerIds(), currentPositions(), null));
     }
 
     loadInstructionsFromIntent();
-    // Instructions are shown inside each overlay box; hide the bottom banner.
+    // Instructions button remains visible at all times; bottom banner still hidden.
     if (placementInfoBox != null) placementInfoBox.setVisibility(View.GONE);
 
     liveTextRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
@@ -601,6 +605,7 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
    * "IIR" -> "11R", "1IR" -> "11R", "12 L" -> "12L".
    */
   private static String normalizeTextToPositionCode(String s) {
+    String pre = s.replace('|', '1').replace('‖', '1').replace('—', '-');
     if (s == null) return null;
     String t = s.trim().toUpperCase(Locale.US).replaceAll("[^A-Z0-9]", "");
     if (t.isEmpty()) return null;
@@ -710,6 +715,53 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
 
   private static float min(float a, float b, float c, float d) {
     return Math.min(Math.min(a, b), Math.min(c, d));
+  }
+
+
+  /**
+   * Build and show the instructions dialog. onDismiss is called after user taps OK or closes.
+   */
+  private void showInstructionsDialog(List<String> containers,
+                                      List<String> positions,
+                                      Runnable onDismiss) {
+    if (containers == null || containers.isEmpty()) return;
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < containers.size(); i++) {
+      sb.append(containers.get(i)).append('-').append(positions.get(i));
+      if (i < containers.size() - 1) {
+        sb.append("\n");
+      }
+    }
+    SpannableString msg = new SpannableString(sb.toString());
+    msg.setSpan(new AlignmentSpan.Standard(Layout.Alignment.ALIGN_CENTER),
+                0, msg.length(), 0);
+
+    new androidx.appcompat.app.AlertDialog.Builder(this)
+        .setTitle("Loaded instructions")
+        .setMessage(msg)
+        .setPositiveButton("OK", (d, w) -> {
+          if (onDismiss != null) onDismiss.run();
+        })
+        .setOnDismissListener(d -> {
+          if (onDismiss != null) onDismiss.run();
+        })
+        .show();
+  }
+
+  private ArrayList<String> currentContainerIds() {
+    ArrayList<String> ids = new ArrayList<>();
+    for (Instruction ins : instructions) {
+      ids.add(ins.containerId);
+    }
+    return ids;
+  }
+
+  private ArrayList<String> currentPositions() {
+    ArrayList<String> pos = new ArrayList<>();
+    for (Instruction ins : instructions) {
+      pos.add(ins.expectedPosition);
+    }
+    return pos;
   }
 
   private static float max(float a, float b, float c, float d) {
@@ -958,27 +1010,6 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
     // Advance on every tap (correct OR wrong), so the workflow never blocks.
     advanceInstructionIndex();
 
-    updateBannerForCurrentInstruction(resultText);
-  }
-
-  private void skipCurrentInstruction() {
-    if (instructions.isEmpty()) return;
-    if (instructionIndex >= instructions.size()) {
-      updateBannerForCurrentInstruction("Done: all required containers processed.");
-      return;
-    }
-
-    Instruction current = instructions.get(instructionIndex);
-
-    clearPreviousHighlightNow();
-    hideWarning();
-
-    String resultText =
-        "⏭ Skipped\n" +
-        current.containerId + "\n" +
-        "Expected: " + current.expectedPosition;
-
-    advanceInstructionIndex();
     updateBannerForCurrentInstruction(resultText);
   }
 

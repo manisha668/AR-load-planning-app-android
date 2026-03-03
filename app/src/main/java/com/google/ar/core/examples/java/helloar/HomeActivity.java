@@ -15,6 +15,7 @@ import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import android.app.AlertDialog;
 
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.text.TextRecognition;
@@ -156,7 +157,9 @@ public class HomeActivity extends AppCompatActivity {
         }
 
         if (tvLoadSheetStatus != null) {
-            tvLoadSheetStatus.setText("Load sheet: " + loadedContainerIds.size() + " instructions loaded");
+            tvLoadSheetStatus.setText("Load sheet: "
+                    + loadedContainerIds.size()
+                    + " instructions loaded");
         }
 
         Toast.makeText(
@@ -164,6 +167,35 @@ public class HomeActivity extends AppCompatActivity {
                 "Loaded " + loadedContainerIds.size() + " instructions",
                 Toast.LENGTH_SHORT
         ).show();
+
+        // show a dialog listing all container-position pairs
+        showInstructionsDialog(loadedContainerIds, loadedExpectedPositions, null);
+    }
+    private void showInstructionsDialog(List<String> containers,
+                                        List<String> positions,
+                                        Runnable onDismiss) {
+        if (containers == null || containers.isEmpty()) return;
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < containers.size(); i++) {
+            sb.append(containers.get(i))
+              .append('-')
+              .append(positions.get(i));
+            if (i < containers.size() - 1) {
+                sb.append("\n");
+            }
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("Loaded instructions")
+            .setMessage(sb.toString())
+            .setPositiveButton("OK", (d, w) -> {
+                if (onDismiss != null) onDismiss.run();
+            })
+            .setOnDismissListener(d -> {
+                if (onDismiss != null) onDismiss.run();
+            })
+            .show();
     }
 
     private String readAllTextFromUri(Uri uri) throws IOException {

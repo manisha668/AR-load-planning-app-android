@@ -16,10 +16,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Draws tappable boxes over detected position labels (e.g. 1L, 12R).
- * Boxes are screen-space (no aircraft grid / no world anchors).
- */
 public class PositionOverlayView extends View {
 
   public enum BoxState {

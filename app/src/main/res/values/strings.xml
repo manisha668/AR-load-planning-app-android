@@ -22,6 +22,7 @@
   <string translatable="false" name="options_title_with_depth">Your device supports depth</string>
   <string translatable="false" name="options_title_without_depth">Your device does not support depth</string>
   <string translatable="false" name="done">Done</string>
+  <string translatable="false" name="instructions">Instructions</string>
   <string-array translatable="false" name="depth_options_array">
     <item>Enable depth</item>
     <item>Show depth map</item>

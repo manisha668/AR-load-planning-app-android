@@ -53,16 +53,17 @@
         android:visibility="gone" />
 
     <Button
-        android:id="@+id/btnSkip"
+        android:id="@+id/btnInstructions"
         android:layout_width="wrap_content"
-        android:layout_height="40dp"
+        android:layout_height="56dp"
         android:layout_alignParentTop="true"
         android:layout_alignParentEnd="true"
-        android:layout_marginTop="18dp"
-        android:layout_marginEnd="16dp"
-        android:text="Skip"
+        android:layout_margin="16dp"
+        android:visibility="visible"
+        android:text="Instructions"
+        android:textSize="16sp"
         android:textAllCaps="false"
-        android:backgroundTint="#546E7A"
+        android:backgroundTint="#385dd7"
         android:textColor="#FFFFFF" />
 
     <!-- Bottom info box, summarizing the last placement check. -->

@@ -25,7 +25,6 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
-import android.widget.TextView;
 import android.widget.Toast;
 import android.text.SpannableString;
 import android.text.style.AlignmentSpan;
@@ -70,15 +69,15 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Board-based validation flow:
+ * Board-based identification:
  * - Load sheet is uploaded first (HomeActivity) and passed as instructions.
- * - Live camera OCR detects position labels (e.g. 1L, 12R) on a physical board.
- * - Draw grey boxes over detected labels; user taps a box to validate current instruction.
- *
- * Instructions are displayed one-by-one and only advance when the correct slot is tapped.
+ * - Live camera OCR detects position labels (e.g. 1L, 12R) and ULD text on matchboxes.
+ * - Each load-sheet slot is drawn as grey until a nearby ULD is read; then green (match) or red
+ *   (mismatch) vs the expected container id for that position.
  */
 public class BoardScanActivity extends AppCompatActivity implements SampleRender.Renderer {
   private static final String TAG = "BoardScanActivity";
@@ -87,14 +86,21 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
   private static final String EXTRA_LOAD_CONTAINERS = "LOAD_CONTAINERS";
   private static final String EXTRA_LOAD_POSITIONS = "LOAD_POSITIONS";
 
-  private static final long OCR_INTERVAL_MS = 600;
+  /** Throttle between ML Kit OCR runs; lower = snappier ULD read but more CPU. */
+  private static final long OCR_INTERVAL_MS = 220;
   private static final Pattern POSITION_CODE_PATTERN = Pattern.compile("^(\\d{1,3})([LR])$");
-  // ULD IDs: accept both real AKE codes (e.g., AKE017373) and simple test IDs (e.g., ULD1, ULD2).
-  // Rule: 3–4 letters followed by 1–6 digits (helps avoid random background noise).
+  // ULD IDs: e.g. AKE017373, PMC12345, ULD1. Allow up to 7 digits for long serials.
   private static final Pattern ULD_CODE_PATTERN =
-      Pattern.compile("^[A-Z]{3,4}\\d{1,6}$");
+      Pattern.compile("^[A-Z]{3,4}\\d{1,7}$");
+  /**
+   * Pull ULD-shaped tokens out of noisy OCR strings (digits may still contain I/L/O before repair).
+   */
+  private static final Pattern ULD_LOOSE_TOKEN_PATTERN =
+      Pattern.compile("([A-Z]{3,4})([0-9IlLO]{1,8})");
   // How long to keep position boxes on screen after they temporarily disappear (to reduce flicker).
   private static final long POSITION_PERSIST_MS = 1800L;
+  // Keep auto ULD match/mismatch colors briefly after OCR drops the label (same idea as position persist).
+  private static final long ULD_AUTO_STATE_PERSIST_MS = 2200L;
 
   private GLSurfaceView surfaceView;
   private boolean installRequested;
@@ -107,27 +113,8 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
   private final SnackbarHelper messageSnackbarHelper = new SnackbarHelper();
   private final TrackingStateHelper trackingStateHelper = new TrackingStateHelper(this);
 
-  private TextView placementInfoBox;
-  private TextView globalWarningBanner;
   private PositionOverlayView positionOverlayView;
   private Button btnInstructions;
-
-  // Highlight handling: show red/green briefly then clear.
-  private static final long HIGHLIGHT_CLEAR_DELAY_MS = 900;
-  private String lastHighlightedCode = null;
-  private final Runnable clearHighlightRunnable =
-      new Runnable() {
-        @Override
-        public void run() {
-          if (lastHighlightedCode != null) {
-            boxStates.remove(lastHighlightedCode);
-            lastHighlightedCode = null;
-            if (positionOverlayView != null) {
-              positionOverlayView.invalidate();
-            }
-          }
-        }
-      };
 
   private static final class Instruction {
     final String containerId;
@@ -139,7 +126,6 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
     }
   }
 
-  private int instructionIndex = 0;
   private final List<Instruction> instructions = new ArrayList<>();
   private final Map<String, PositionOverlayView.BoxState> boxStates = new HashMap<>();
 
@@ -153,6 +139,8 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
   // For smoothing / flicker reduction.
   private final Map<String, RectF> lastViewRects = new HashMap<>();
   private final Map<String, Long> lastSeenPositionMs = new HashMap<>();
+  private final Map<String, PositionOverlayView.BoxState> autoUldStickyState = new HashMap<>();
+  private final Map<String, Long> autoUldStickyTimeMs = new HashMap<>();
 
   private static final class DetectedPosition {
     final String code;     // e.g. "12R"
@@ -183,11 +171,13 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
     displayRotationHelper = new DisplayRotationHelper(/* context= */ this);
     render = new SampleRender(surfaceView, this, getAssets());
 
-    placementInfoBox = findViewById(R.id.placement_info_box);
-    globalWarningBanner = findViewById(R.id.global_warning_banner);
     positionOverlayView = findViewById(R.id.position_overlay);
 
-    positionOverlayView.setOnPositionTappedListener(this::onPositionTapped);
+    View placementInfoBox = findViewById(R.id.placement_info_box);
+    if (placementInfoBox != null) placementInfoBox.setVisibility(View.GONE);
+    View globalWarningBanner = findViewById(R.id.global_warning_banner);
+    if (globalWarningBanner != null) globalWarningBanner.setVisibility(View.GONE);
+
     btnInstructions = findViewById(R.id.btnInstructions);
     if (btnInstructions != null) {
       btnInstructions.setOnClickListener(v -> showInstructionsDialog(
@@ -195,8 +185,6 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
     }
 
     loadInstructionsFromIntent();
-    // Instructions button remains visible at all times; bottom banner still hidden.
-    if (placementInfoBox != null) placementInfoBox.setVisibility(View.GONE);
 
     liveTextRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
     installRequested = false;
@@ -222,7 +210,6 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
     ArrayList<String> positions = getIntent().getStringArrayListExtra(EXTRA_LOAD_POSITIONS);
 
     instructions.clear();
-    instructionIndex = 0;
 
     if (containers == null || positions == null || containers.isEmpty() || containers.size() != positions.size()) {
       Toast.makeText(this, "Missing load sheet instructions. Go back and upload again.", Toast.LENGTH_LONG).show();
@@ -561,37 +548,82 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
     Map<String, DetectedUld> bestById = new HashMap<>();
 
     for (Text.TextBlock block : text.getTextBlocks()) {
+      if (block == null) continue;
+
       for (Text.Line line : block.getLines()) {
         if (line == null) continue;
 
-        String cleaned = normalizeUldText(line.getText());
-        if (cleaned == null) {
-          StringBuilder sb = new StringBuilder();
-          for (Text.Element el : line.getElements()) {
-            if (el == null) continue;
-            String et = el.getText();
-            if (et != null) sb.append(et);
-          }
-          cleaned = normalizeUldText(sb.toString());
+        // 1) Element-first: compact ULD print on matchboxes gets tight boxes → better pairing with slot labels.
+        for (Text.Element el : line.getElements()) {
+          if (el == null) continue;
+          String normalized = normalizeUldText(el.getText());
+          if (normalized == null) continue;
+          Rect bb = el.getBoundingBox();
+          if (bb == null) continue;
+          RectF imageRect = rotatedRectToSensorRect(bb, rotationDegrees, w, h);
+          if (imageRect == null) continue;
+          putUldIfBetterLocalizer(bestById, normalized, imageRect);
         }
-        if (cleaned == null) continue;
 
-        Rect bb = line.getBoundingBox();
-        if (bb == null) continue;
+        // 2) Whole ML Kit line (handles spacing between prefix and digits).
+        String lineNorm = normalizeUldText(line.getText());
+        if (lineNorm != null) {
+          Rect bb = line.getBoundingBox();
+          if (bb != null) {
+            RectF imageRect = rotatedRectToSensorRect(bb, rotationDegrees, w, h);
+            if (imageRect != null) {
+              putUldIfBetterLocalizer(bestById, lineNorm, imageRect);
+            }
+          }
+        }
 
-        RectF imageRect = rotatedRectToSensorRect(bb, rotationDegrees, w, h);
-        if (imageRect == null) continue;
-
-        Log.d(TAG, "ULD OCR accepted line '" + line.getText() + "' -> '" + cleaned + "'");
-
-        DetectedUld existing = bestById.get(cleaned);
-        if (existing == null || area(imageRect) > area(existing.imageRect)) {
-          bestById.put(cleaned, new DetectedUld(cleaned, imageRect));
+        // 3) Concatenated elements on one line (no space in OCR between "AKE" and "017373").
+        StringBuilder sb = new StringBuilder();
+        for (Text.Element el : line.getElements()) {
+          if (el == null) continue;
+          String et = el.getText();
+          if (et != null) sb.append(et);
+        }
+        String concatNorm = normalizeUldText(sb.toString());
+        if (concatNorm != null) {
+          Rect union = unionElementBoundingBoxes(line);
+          Rect useRect = union != null ? union : line.getBoundingBox();
+          if (useRect != null) {
+            RectF imageRect = rotatedRectToSensorRect(useRect, rotationDegrees, w, h);
+            if (imageRect != null) {
+              putUldIfBetterLocalizer(bestById, concatNorm, imageRect);
+            }
+          }
         }
       }
     }
 
     return new ArrayList<>(bestById.values());
+  }
+
+  /** Prefer the smallest bounding box per ULD id so pairing uses a center near the label, not the whole line. */
+  private static void putUldIfBetterLocalizer(
+      Map<String, DetectedUld> bestById, String uldId, RectF imageRect) {
+    DetectedUld existing = bestById.get(uldId);
+    if (existing == null || area(imageRect) < area(existing.imageRect)) {
+      bestById.put(uldId, new DetectedUld(uldId, imageRect));
+    }
+  }
+
+  private static Rect unionElementBoundingBoxes(Text.Line line) {
+    if (line == null) return null;
+    Rect u = null;
+    for (Text.Element el : line.getElements()) {
+      if (el == null) continue;
+      Rect r = el.getBoundingBox();
+      if (r == null) continue;
+      if (u == null) {
+        u = new Rect(r);
+      } else {
+        u.union(r);
+      }
+    }
+    return u;
   }
 
   private static float area(RectF r) {
@@ -655,14 +687,41 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
   }
 
   /**
-   * Normalizes raw OCR text into a ULD ID (e.g., AKE017373).
+   * Normalizes raw OCR text into a ULD ID (e.g., AKE017373), including embedded tokens and common
+   * digit confusions (O/0, I/1, L/1) in the numeric suffix.
    */
   private static String normalizeUldText(String s) {
     if (s == null) return null;
     String t = s.trim().toUpperCase(Locale.US).replaceAll("[^A-Z0-9]", "");
     if (t.isEmpty()) return null;
-    if (!ULD_CODE_PATTERN.matcher(t).matches()) return null;
-    return t;
+
+    String direct = repairUldCandidate(t);
+    if (direct != null) return direct;
+
+    String best = null;
+    Matcher m = ULD_LOOSE_TOKEN_PATTERN.matcher(t);
+    while (m.find()) {
+      String letters = m.group(1);
+      String digitPart = normalizeDigitsFromOcr(m.group(2));
+      if (digitPart.isEmpty()) continue;
+      String candidate = letters + digitPart;
+      if (!ULD_CODE_PATTERN.matcher(candidate).matches()) continue;
+      if (best == null || candidate.length() > best.length()) {
+        best = candidate;
+      }
+    }
+    return best;
+  }
+
+  /** Applies digit OCR fixes to a string that is already [A-Z]{3,4}\\d+. */
+  private static String repairUldCandidate(String alnumUpper) {
+    Matcher m = ULD_LOOSE_TOKEN_PATTERN.matcher(alnumUpper);
+    if (!m.matches()) return null;
+    String letters = m.group(1);
+    String digitPart = normalizeDigitsFromOcr(m.group(2));
+    if (digitPart.isEmpty()) return null;
+    String candidate = letters + digitPart;
+    return ULD_CODE_PATTERN.matcher(candidate).matches() ? candidate : null;
   }
 
   /** Canonicalize ULD IDs for comparisons (strip spaces/dashes/punctuation). */
@@ -735,7 +794,6 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
     SpannableString msg = new SpannableString(sb.toString());
     msg.setSpan(new AlignmentSpan.Standard(Layout.Alignment.ALIGN_CENTER),
                 0, msg.length(), 0);
-
     new androidx.appcompat.app.AlertDialog.Builder(this)
         .setTitle("Loaded instructions")
         .setMessage(msg)
@@ -866,98 +924,111 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
 
   /**
    * For each detected ULD matchbox, find the nearest position label and
-   * mark that slot as CORRECT (grey) or WRONG (red) based on the load sheet.
+   * mark that slot as CORRECT (green) or WRONG (red) based on the load sheet.
+   *
+   * <p>OCR often drops the ULD for a frame; without persistence, green/red would flicker off.
    */
   private void autoEvaluateUldPlacement(Map<String, DetectedPosition> positionByCode) {
     List<DetectedUld> ulds = latestUldDetections.get();
 
-    // Build expected ULD per position from load sheet.
     Map<String, String> expectedUldByPosition = new HashMap<>();
     for (Instruction ins : instructions) {
       if (ins == null || ins.expectedPosition == null || ins.containerId == null) continue;
       String pos = ins.expectedPosition.toUpperCase(Locale.US);
       String uld = canonicalizeUldId(ins.containerId);
       if (uld == null) continue;
-      // If multiple ULDs share the same slot, the last one wins for now.
       expectedUldByPosition.put(pos, uld);
     }
 
-    // Start all visible slots as NEUTRAL every frame.
-    // If no ULDs are visible, boxes will stay grey; if ULDs are visible,
-    // we override some slots below as CORRECT/WRONG.
+    Map<String, PositionOverlayView.BoxState> fresh = new HashMap<>();
+    if (ulds != null) {
+      for (DetectedUld uld : ulds) {
+        if (uld == null || uld.uldId == null || uld.imageRect == null) continue;
+
+        String nearestCode = null;
+        float nearestDistSq = Float.MAX_VALUE;
+        float uldCx = uld.imageRect.centerX();
+        float uldCy = uld.imageRect.centerY();
+
+        for (Map.Entry<String, DetectedPosition> e : positionByCode.entrySet()) {
+          DetectedPosition dp = e.getValue();
+          if (dp == null || dp.imageRect == null) continue;
+          float cx = dp.imageRect.centerX();
+          float cy = dp.imageRect.centerY();
+          float dx = cx - uldCx;
+          float dy = cy - uldCy;
+          float distSq = dx * dx + dy * dy;
+          if (distSq < nearestDistSq) {
+            nearestDistSq = distSq;
+            nearestCode = e.getKey();
+          }
+        }
+
+        if (nearestCode == null) continue;
+
+        DetectedPosition nearestPos = positionByCode.get(nearestCode);
+        if (nearestPos == null || nearestPos.imageRect == null) continue;
+        RectF posRect = nearestPos.imageRect;
+        RectF expanded = new RectF(posRect);
+        float expandX = posRect.width();
+        float expandY = posRect.height();
+        expanded.inset(-expandX, -expandY);
+        if (!expanded.contains(uldCx, uldCy)) {
+          continue;
+        }
+
+        String expectedUld = expectedUldByPosition.get(nearestCode.toUpperCase(Locale.US));
+        if (expectedUld == null) continue;
+
+        String detectedUld = canonicalizeUldId(uld.uldId);
+        if (detectedUld == null) continue;
+        boolean match = detectedUld.equals(expectedUld);
+
+        Log.d(
+            TAG,
+            "ULD match check: position="
+                + nearestCode
+                + " expected="
+                + expectedUld
+                + " detected="
+                + detectedUld
+                + " -> "
+                + (match ? "CORRECT" : "WRONG"));
+
+        fresh.put(
+            nearestCode,
+            match ? PositionOverlayView.BoxState.CORRECT : PositionOverlayView.BoxState.WRONG);
+      }
+    }
+
+    long now = SystemClock.elapsedRealtime();
+
     for (String code : positionByCode.keySet()) {
-      boxStates.put(code, PositionOverlayView.BoxState.NEUTRAL);
-    }
-
-    if (ulds == null || ulds.isEmpty()) {
-      // No ULDs visible this frame: leave everything as NEUTRAL (grey).
-      return;
-    }
-
-    for (DetectedUld uld : ulds) {
-      if (uld == null || uld.uldId == null || uld.imageRect == null) continue;
-
-      // Find the nearest position to this ULD in IMAGE_PIXELS space.
-      String nearestCode = null;
-      float nearestDistSq = Float.MAX_VALUE;
-      float uldCx = uld.imageRect.centerX();
-      float uldCy = uld.imageRect.centerY();
-
-      for (Map.Entry<String, DetectedPosition> e : positionByCode.entrySet()) {
-        DetectedPosition dp = e.getValue();
-        if (dp == null || dp.imageRect == null) continue;
-        float cx = dp.imageRect.centerX();
-        float cy = dp.imageRect.centerY();
-        float dx = cx - uldCx;
-        float dy = cy - uldCy;
-        float distSq = dx * dx + dy * dy;
-        if (distSq < nearestDistSq) {
-          nearestDistSq = distSq;
-          nearestCode = e.getKey();
+      PositionOverlayView.BoxState state;
+      if (fresh.containsKey(code)) {
+        state = fresh.get(code);
+        autoUldStickyState.put(code, state);
+        autoUldStickyTimeMs.put(code, now);
+      } else {
+        PositionOverlayView.BoxState prev = autoUldStickyState.get(code);
+        Long t = autoUldStickyTimeMs.get(code);
+        if (prev != null
+            && t != null
+            && (prev == PositionOverlayView.BoxState.CORRECT
+                || prev == PositionOverlayView.BoxState.WRONG)
+            && (now - t) <= ULD_AUTO_STATE_PERSIST_MS) {
+          state = prev;
+        } else {
+          state = PositionOverlayView.BoxState.NEUTRAL;
+          autoUldStickyState.remove(code);
+          autoUldStickyTimeMs.remove(code);
         }
       }
-
-      if (nearestCode == null) continue;
-
-      // Reject far-away ULDs: the ULD must lie reasonably close to the slot box.
-      DetectedPosition nearestPos = positionByCode.get(nearestCode);
-      if (nearestPos == null || nearestPos.imageRect == null) continue;
-      RectF posRect = nearestPos.imageRect;
-      RectF expanded = new RectF(posRect);
-      // Expand by one slot width/height in all directions (looser check to allow small misalignment).
-      float expandX = posRect.width();
-      float expandY = posRect.height();
-      expanded.inset(-expandX, -expandY);
-      if (!expanded.contains(uldCx, uldCy)) {
-        // This ULD is too far from any slot; ignore it so the slot stays grey.
-        continue;
-      }
-
-      String expectedUld = expectedUldByPosition.get(nearestCode.toUpperCase(Locale.US));
-      if (expectedUld == null) {
-        // Load sheet has no ULD for this slot; leave as neutral.
-        continue;
-      }
-
-      String detectedUld = canonicalizeUldId(uld.uldId);
-      if (detectedUld == null) continue;
-      boolean match = detectedUld.equals(expectedUld);
-
-      Log.d(
-          TAG,
-          "ULD match check: position="
-              + nearestCode
-              + " expected="
-              + expectedUld
-              + " detected="
-              + detectedUld
-              + " -> "
-              + (match ? "CORRECT" : "WRONG"));
-
-      boxStates.put(
-          nearestCode,
-          match ? PositionOverlayView.BoxState.CORRECT : PositionOverlayView.BoxState.WRONG);
+      boxStates.put(code, state);
     }
+
+    autoUldStickyState.keySet().removeIf(c -> !positionByCode.containsKey(c));
+    autoUldStickyTimeMs.keySet().removeIf(c -> !positionByCode.containsKey(c));
   }
 
   /** Returns true if any instruction in the load sheet uses this position code. */
@@ -971,110 +1042,6 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
       }
     }
     return false;
-  }
-
-  private void onPositionTapped(String tappedPositionCode) {
-    String tapped = normalizePositionCode(tappedPositionCode);
-    if (tapped == null) return;
-    if (instructions.isEmpty()) return;
-
-    if (instructionIndex >= instructions.size()) {
-      updateBannerForCurrentInstruction("Done: all required containers processed.");
-      return;
-    }
-
-    Instruction current = instructions.get(instructionIndex);
-    boolean isCorrect = tapped.equalsIgnoreCase(current.expectedPosition);
-
-    // Clear previous highlight immediately.
-    clearPreviousHighlightNow();
-
-    boxStates.put(tapped, isCorrect ? PositionOverlayView.BoxState.CORRECT : PositionOverlayView.BoxState.WRONG);
-    positionOverlayView.setBoxState(tapped, boxStates.get(tapped));
-    lastHighlightedCode = tapped;
-    scheduleHighlightClear();
-
-    String resultText;
-    if (isCorrect) {
-      resultText = "✔ Correct\n" +
-          current.containerId + " at " + tapped + "\n" +
-          "Expected: " + current.expectedPosition;
-      hideWarning();
-    } else {
-      resultText = "✖ Wrong\n" +
-          current.containerId + " tapped: " + tapped + "\n" +
-          "Expected: " + current.expectedPosition;
-      showWarning("Wrong slot. Expected " + current.expectedPosition + " for " + current.containerId);
-    }
-
-    // Advance on every tap (correct OR wrong), so the workflow never blocks.
-    advanceInstructionIndex();
-
-    updateBannerForCurrentInstruction(resultText);
-  }
-
-  private void advanceInstructionIndex() {
-    if (instructionIndex < instructions.size() - 1) {
-      instructionIndex++;
-    } else {
-      instructionIndex = instructions.size();
-    }
-  }
-
-  private void clearPreviousHighlightNow() {
-    if (positionOverlayView != null) {
-      positionOverlayView.removeCallbacks(clearHighlightRunnable);
-    }
-    if (lastHighlightedCode != null) {
-      boxStates.remove(lastHighlightedCode);
-      lastHighlightedCode = null;
-    }
-  }
-
-  private void scheduleHighlightClear() {
-    if (positionOverlayView == null) return;
-    positionOverlayView.removeCallbacks(clearHighlightRunnable);
-    positionOverlayView.postDelayed(clearHighlightRunnable, HIGHLIGHT_CLEAR_DELAY_MS);
-  }
-
-  private void updateBannerForCurrentInstruction(String lastResultText) {
-    runOnUiThread(() -> {
-      if (placementInfoBox == null) return;
-
-      if (instructionIndex >= instructions.size()) {
-        placementInfoBox.setText(
-            (lastResultText != null ? (lastResultText + "\n\n") : "") +
-            "Done: all required containers processed."
-        );
-        placementInfoBox.setBackgroundColor(0xCC37474F);
-        return;
-      }
-
-      Instruction next = instructions.get(instructionIndex);
-      String nextText = "NEXT: Place " + next.containerId + " at " + next.expectedPosition;
-
-      if (lastResultText == null) {
-        placementInfoBox.setText(nextText);
-      } else {
-        placementInfoBox.setText(lastResultText + "\n\n" + nextText);
-      }
-      placementInfoBox.setBackgroundColor(0xCC37474F);
-    });
-  }
-
-  private void showWarning(String text) {
-    runOnUiThread(() -> {
-      if (globalWarningBanner == null) return;
-      globalWarningBanner.setText(text);
-      globalWarningBanner.setVisibility(View.VISIBLE);
-    });
-  }
-
-  private void hideWarning() {
-    runOnUiThread(() -> {
-      if (globalWarningBanner == null) return;
-      globalWarningBanner.setVisibility(View.GONE);
-    });
   }
 }
 

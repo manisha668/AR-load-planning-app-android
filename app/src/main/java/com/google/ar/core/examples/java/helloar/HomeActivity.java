@@ -127,7 +127,10 @@ public class HomeActivity extends AppCompatActivity {
     }
 
     private void ocrBitmapAndParse(Bitmap bitmap) {
-        InputImage image = InputImage.fromBitmap(bitmap, 0);
+        // Many load-sheet screenshots are low-resolution; OCR accuracy drops unless the user zooms.
+        // Scale up moderately before running ML Kit to improve recognition.
+        Bitmap ocrBitmap = maybeScaleForOcr(bitmap);
+        InputImage image = InputImage.fromBitmap(ocrBitmap, 0);
         textRecognizer
                 .process(image)
                 .addOnSuccessListener(result -> {
@@ -137,6 +140,33 @@ public class HomeActivity extends AppCompatActivity {
                     Log.w("HOME", "OCR failed", e);
                     Toast.makeText(this, "OCR failed", Toast.LENGTH_SHORT).show();
                 });
+    }
+
+    /**
+     * Upscales small/medium images to improve OCR (mimics "zooming" without user action).
+     * Keeps aspect ratio and avoids excessive memory use.
+     */
+    private Bitmap maybeScaleForOcr(Bitmap bitmap) {
+        if (bitmap == null) return null;
+        int w = bitmap.getWidth();
+        int h = bitmap.getHeight();
+        if (w <= 0 || h <= 0) return bitmap;
+
+        // Target the long edge to around 2200–2800 px for better text recognition.
+        int longEdge = Math.max(w, h);
+        int targetLongEdge = 2600;
+        if (longEdge >= targetLongEdge) return bitmap;
+
+        float scale = targetLongEdge / (float) longEdge;
+        int newW = Math.max(1, Math.round(w * scale));
+        int newH = Math.max(1, Math.round(h * scale));
+
+        try {
+            return Bitmap.createScaledBitmap(bitmap, newW, newH, true);
+        } catch (OutOfMemoryError oom) {
+            // If the device is memory-constrained, fall back to original.
+            return bitmap;
+        }
     }
 
     private void applyParsedInstructions(List<LoadSheetInstructionParser.Instruction> instructions) {

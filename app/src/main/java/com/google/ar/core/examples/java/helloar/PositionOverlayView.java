@@ -191,6 +191,9 @@ public class PositionOverlayView extends View {
 
   @Override
   public boolean onTouchEvent(MotionEvent event) {
+    if (listener == null) {
+      return false;
+    }
     if (event == null) return true;
     if (event.getAction() != MotionEvent.ACTION_UP) return true;
 
@@ -210,10 +213,10 @@ public class PositionOverlayView extends View {
       }
     }
 
-    if (hit != null && listener != null) {
+    if (hit != null) {
       listener.onPositionTapped(hit.code);
     }
-    return true; // Always consume touches to avoid AR hit-tests.
+    return true;
   }
 }
 

@@ -16,21 +16,37 @@
 
 package com.google.ar.core.examples.java.helloar;
 
+import android.content.ContentResolver;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.pdf.PdfRenderer;
+import android.net.Uri;
 import android.opengl.GLES30;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
-import android.util.Log;
-import android.view.View;
-import android.widget.Button;
-import android.widget.Toast;
+import android.text.Layout;
 import android.text.SpannableString;
 import android.text.style.AlignmentSpan;
-import android.text.Layout;
+import android.util.Log;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.widget.Button;
+import android.widget.ImageView;
+import android.widget.TextView;
+import android.widget.Toast;
 
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 
 import com.google.ar.core.ArCoreApk;
 import com.google.ar.core.Camera;
@@ -73,11 +89,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Board-based identification:
- * - Load sheet is uploaded first (HomeActivity) and passed as instructions.
- * - Live camera OCR detects position labels (e.g. 1L, 12R) and ULD text on matchboxes.
- * - Each load-sheet slot is drawn as grey until a nearby ULD is read; then green (match) or red
- *   (mismatch) vs the expected container id for that position.
+ * Live board scan: ARCore camera + ML Kit OCR for position labels and ULD tokens. Overlays
+ * grey/green/red per load-sheet slot; optional document preview in {@link #showInstructionsDialog}.
  */
 public class BoardScanActivity extends AppCompatActivity implements SampleRender.Renderer {
   private static final String TAG = "BoardScanActivity";
@@ -85,6 +98,14 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
   // Intent extras (set in HomeActivity).
   private static final String EXTRA_LOAD_CONTAINERS = "LOAD_CONTAINERS";
   private static final String EXTRA_LOAD_POSITIONS = "LOAD_POSITIONS";
+
+  /** Passed from {@link HomeActivity} so the load-sheet dialog can show the original file. */
+  public static final String EXTRA_LOAD_SHEET_DOCUMENT_URI = "LOAD_SHEET_DOCUMENT_URI";
+
+  public static final String EXTRA_LOAD_SHEET_DOCUMENT_MIME = "LOAD_SHEET_DOCUMENT_MIME";
+
+  /** Max long edge when decoding the uploaded sheet for preview (memory friendly). */
+  private static final int LOAD_SHEET_PREVIEW_MAX_EDGE_PX = 2200;
 
   /** Throttle between ML Kit OCR runs; lower = snappier ULD read but more CPU. */
   private static final long OCR_INTERVAL_MS = 220;
@@ -115,6 +136,10 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
 
   private PositionOverlayView positionOverlayView;
   private Button btnInstructions;
+
+  /** Optional: original load sheet URI (string) + MIME from HomeActivity for preview in dialog. */
+  private String loadSheetDocumentUriString;
+  private String loadSheetDocumentMime;
 
   private static final class Instruction {
     final String containerId;
@@ -206,6 +231,9 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
   }
 
   private void loadInstructionsFromIntent() {
+    loadSheetDocumentUriString = getIntent().getStringExtra(EXTRA_LOAD_SHEET_DOCUMENT_URI);
+    loadSheetDocumentMime = getIntent().getStringExtra(EXTRA_LOAD_SHEET_DOCUMENT_MIME);
+
     ArrayList<String> containers = getIntent().getStringArrayListExtra(EXTRA_LOAD_CONTAINERS);
     ArrayList<String> positions = getIntent().getStringArrayListExtra(EXTRA_LOAD_POSITIONS);
 
@@ -637,15 +665,14 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
    * "IIR" -> "11R", "1IR" -> "11R", "12 L" -> "12L".
    */
   private static String normalizeTextToPositionCode(String s) {
-    String pre = s.replace('|', '1').replace('‖', '1').replace('—', '-');
     if (s == null) return null;
-    String t = s.trim().toUpperCase(Locale.US).replaceAll("[^A-Z0-9]", "");
+    String normalizedSeparators =
+        s.replace('|', '1').replace('‖', '1').replace('—', '-');
+    String t =
+        normalizedSeparators.trim().toUpperCase(Locale.US).replaceAll("[^A-Z0-9]", "");
     if (t.isEmpty()) return null;
 
-    // Fast-path: already valid.
     if (POSITION_CODE_PATTERN.matcher(t).matches()) return t;
-
-    // Expected format is digits + L/R at the end. Try to repair OCR confusions in the digit part.
     if (t.length() >= 2) {
       char last = t.charAt(t.length() - 1);
       String head = t.substring(0, t.length() - 1);
@@ -656,7 +683,7 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
         if (POSITION_CODE_PATTERN.matcher(candidate).matches()) return candidate;
       }
 
-      // Sometimes trailing 'L' is misread as '1' (especially if the label is handwritten).
+      // Trailing 'L' sometimes misread as '1' or 'I' on handwritten labels.
       if (last == '1' || last == 'I') {
         String fixedHead = normalizeDigitsFromOcr(head);
         String candidate = fixedHead + 'L';
@@ -664,7 +691,7 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
       }
     }
 
-    // Sometimes OCR reverses order (e.g., "R11"). Repair that too.
+    // Repair order like "R11" -> "11R".
     if (t.length() >= 2) {
       char first = t.charAt(0);
       if (first == 'L' || first == 'R') {
@@ -679,7 +706,6 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
 
   private static String normalizeDigitsFromOcr(String digits) {
     if (digits == null) return "";
-    // Only apply to the numeric part (before L/R).
     return digits
         .replace('I', '1')
         .replace('L', '1')
@@ -778,32 +804,234 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
 
 
   /**
-   * Build and show the instructions dialog. onDismiss is called after user taps OK or closes.
+   * Shows parsed instructions plus the uploaded load sheet (image, first PDF page, or text)
+   * when HomeActivity passed a document URI.
    */
   private void showInstructionsDialog(List<String> containers,
                                       List<String> positions,
                                       Runnable onDismiss) {
     if (containers == null || containers.isEmpty()) return;
+
     StringBuilder sb = new StringBuilder();
     for (int i = 0; i < containers.size(); i++) {
       sb.append(containers.get(i)).append('-').append(positions.get(i));
       if (i < containers.size() - 1) {
-        sb.append("\n");
+        sb.append('\n');
       }
     }
-    SpannableString msg = new SpannableString(sb.toString());
-    msg.setSpan(new AlignmentSpan.Standard(Layout.Alignment.ALIGN_CENTER),
-                0, msg.length(), 0);
+
+    View root =
+        LayoutInflater.from(this).inflate(R.layout.dialog_load_sheet_instructions, null, false);
+    TextView instructionList = root.findViewById(R.id.instruction_list);
+    TextView previewUnavailable = root.findViewById(R.id.preview_unavailable);
+    ImageView previewImage = root.findViewById(R.id.sheet_preview_image);
+    TextView previewText = root.findViewById(R.id.sheet_preview_text);
+
+    SpannableString centeredInstructions = new SpannableString(sb.toString());
+    centeredInstructions.setSpan(
+        new AlignmentSpan.Standard(Layout.Alignment.ALIGN_CENTER),
+        0,
+        centeredInstructions.length(),
+        0);
+    instructionList.setText(centeredInstructions);
+
+    Bitmap previewBitmap = null;
+    try {
+      previewBitmap = buildLoadSheetPreviewBitmap();
+    } catch (Exception e) {
+      Log.w(TAG, "Load sheet preview failed", e);
+    }
+
+    if (previewBitmap != null) {
+      previewImage.setImageBitmap(previewBitmap);
+      previewImage.setVisibility(View.VISIBLE);
+      previewUnavailable.setVisibility(View.GONE);
+      previewText.setVisibility(View.GONE);
+    } else {
+      previewImage.setVisibility(View.GONE);
+      String hint = getLoadSheetPreviewUnavailableMessage();
+      previewUnavailable.setText(hint);
+      previewUnavailable.setVisibility(View.VISIBLE);
+
+      String textPreview = tryReadTextPreviewIfPlain();
+      if (textPreview != null && !textPreview.isEmpty()) {
+        previewText.setText(textPreview);
+        previewText.setVisibility(View.VISIBLE);
+        previewUnavailable.setVisibility(View.GONE);
+      }
+    }
+
+    final Bitmap toRecycle = previewBitmap;
     new androidx.appcompat.app.AlertDialog.Builder(this)
-        .setTitle("Loaded instructions")
-        .setMessage(msg)
-        .setPositiveButton("OK", (d, w) -> {
-          if (onDismiss != null) onDismiss.run();
-        })
-        .setOnDismissListener(d -> {
-          if (onDismiss != null) onDismiss.run();
-        })
+        .setTitle("Load sheet")
+        .setView(root)
+        .setPositiveButton("OK", (d, w) -> {})
+        .setOnDismissListener(
+            d -> {
+              if (toRecycle != null && !toRecycle.isRecycled()) {
+                toRecycle.recycle();
+              }
+              previewImage.setImageDrawable(null);
+              if (onDismiss != null) onDismiss.run();
+            })
         .show();
+  }
+
+  private String getLoadSheetPreviewUnavailableMessage() {
+    if (loadSheetDocumentUriString == null || loadSheetDocumentUriString.isEmpty()) {
+      return "No file preview: open the scan from Home after uploading a PDF or image to attach the document.";
+    }
+    return "Could not show a visual preview for this file. Parsed instructions are listed above.";
+  }
+
+  @Nullable
+  private Bitmap buildLoadSheetPreviewBitmap() {
+    if (loadSheetDocumentUriString == null || loadSheetDocumentUriString.isEmpty()) {
+      return null;
+    }
+    Uri uri = Uri.parse(loadSheetDocumentUriString);
+    String mime = loadSheetDocumentMime != null ? loadSheetDocumentMime : "";
+
+    if (mime.startsWith("image/")) {
+      return decodeBitmapPreviewFromUri(uri, LOAD_SHEET_PREVIEW_MAX_EDGE_PX);
+    }
+    if ("application/pdf".equalsIgnoreCase(mime)) {
+      return renderPdfFirstPagePreview(uri, LOAD_SHEET_PREVIEW_MAX_EDGE_PX);
+    }
+    Bitmap asImage = decodeBitmapPreviewFromUri(uri, LOAD_SHEET_PREVIEW_MAX_EDGE_PX);
+    if (asImage != null) {
+      return asImage;
+    }
+    return renderPdfFirstPagePreview(uri, LOAD_SHEET_PREVIEW_MAX_EDGE_PX);
+  }
+
+  @Nullable
+  private String tryReadTextPreviewIfPlain() {
+    if (loadSheetDocumentUriString == null || loadSheetDocumentUriString.isEmpty()) {
+      return null;
+    }
+    String mime = loadSheetDocumentMime != null ? loadSheetDocumentMime : "";
+    if (!mime.startsWith("text/")
+        && !"text/plain".equalsIgnoreCase(mime)
+        && !"application/json".equalsIgnoreCase(mime)) {
+      return null;
+    }
+    Uri uri = Uri.parse(loadSheetDocumentUriString);
+    final int maxChars = 12000;
+    try (InputStream is = getContentResolver().openInputStream(uri)) {
+      if (is == null) return null;
+      try (BufferedReader br =
+          new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+        char[] buf = new char[maxChars];
+        int n = br.read(buf);
+        if (n <= 0) return null;
+        String s = new String(buf, 0, n);
+        if (n == maxChars) {
+          s = s + "\n…";
+        }
+        return s;
+      }
+    } catch (Exception e) {
+      Log.w(TAG, "Text preview read failed", e);
+      return null;
+    }
+  }
+
+  @Nullable
+  private Bitmap decodeBitmapPreviewFromUri(Uri uri, int maxLongEdge) {
+    ContentResolver cr = getContentResolver();
+    BitmapFactory.Options bounds = new BitmapFactory.Options();
+    bounds.inJustDecodeBounds = true;
+    try (InputStream is = cr.openInputStream(uri)) {
+      if (is == null) return null;
+      BitmapFactory.decodeStream(is, null, bounds);
+    } catch (Exception e) {
+      Log.w(TAG, "Bitmap bounds decode failed", e);
+      return null;
+    }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+
+    BitmapFactory.Options opts = new BitmapFactory.Options();
+    opts.inSampleSize = calculateInSampleSize(bounds.outWidth, bounds.outHeight, maxLongEdge);
+    opts.inPreferredConfig = Bitmap.Config.RGB_565;
+    try (InputStream is = cr.openInputStream(uri)) {
+      if (is == null) return null;
+      Bitmap decoded = BitmapFactory.decodeStream(is, null, opts);
+      return maybeDownscaleBitmap(decoded, maxLongEdge);
+    } catch (Exception e) {
+      Log.w(TAG, "Bitmap preview decode failed", e);
+      return null;
+    }
+  }
+
+  @Nullable
+  private Bitmap renderPdfFirstPagePreview(Uri uri, int maxLongEdge) {
+    ParcelFileDescriptor pfd = null;
+    PdfRenderer renderer = null;
+    PdfRenderer.Page page = null;
+    Bitmap bitmap = null;
+    try {
+      pfd = getContentResolver().openFileDescriptor(uri, "r");
+      if (pfd == null) return null;
+      renderer = new PdfRenderer(pfd);
+      if (renderer.getPageCount() <= 0) return null;
+      page = renderer.openPage(0);
+      int w = Math.max(1, page.getWidth() * 2);
+      int h = Math.max(1, page.getHeight() * 2);
+      bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+      bitmap.eraseColor(Color.WHITE);
+      page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+      return maybeDownscaleBitmap(bitmap, maxLongEdge);
+    } catch (Exception e) {
+      Log.w(TAG, "PDF preview render failed", e);
+      if (bitmap != null && !bitmap.isRecycled()) {
+        bitmap.recycle();
+      }
+      return null;
+    } finally {
+      try {
+        if (page != null) page.close();
+      } catch (Exception ignored) {
+      }
+      try {
+        if (renderer != null) renderer.close();
+      } catch (Exception ignored) {
+      }
+      try {
+        if (pfd != null) pfd.close();
+      } catch (Exception ignored) {
+      }
+    }
+  }
+
+  private static int calculateInSampleSize(int outWidth, int outHeight, int maxLongEdge) {
+    int longEdge = Math.max(outWidth, outHeight);
+    int inSampleSize = 1;
+    while (longEdge / inSampleSize > maxLongEdge) {
+      inSampleSize *= 2;
+    }
+    return Math.max(1, inSampleSize);
+  }
+
+  @Nullable
+  private static Bitmap maybeDownscaleBitmap(@Nullable Bitmap src, int maxLongEdge) {
+    if (src == null) return null;
+    int w = src.getWidth();
+    int h = src.getHeight();
+    int longEdge = Math.max(w, h);
+    if (longEdge <= maxLongEdge) return src;
+    float scale = maxLongEdge / (float) longEdge;
+    int nw = Math.max(1, Math.round(w * scale));
+    int nh = Math.max(1, Math.round(h * scale));
+    try {
+      Bitmap scaled = Bitmap.createScaledBitmap(src, nw, nh, true);
+      if (scaled != src) {
+        src.recycle();
+      }
+      return scaled;
+    } catch (OutOfMemoryError oom) {
+      return src;
+    }
   }
 
   private ArrayList<String> currentContainerIds() {
@@ -854,8 +1082,6 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
       if (!hasInstructionForPosition(dp.code)) continue;
 
       positionByCode.put(dp.code, dp);
-      // Only visualize positions that appear in the load sheet.
-      if (!hasInstructionForPosition(dp.code)) continue;
 
       float[] in = new float[] {
           dp.imageRect.left, dp.imageRect.top,
@@ -983,17 +1209,6 @@ public class BoardScanActivity extends AppCompatActivity implements SampleRender
         String detectedUld = canonicalizeUldId(uld.uldId);
         if (detectedUld == null) continue;
         boolean match = detectedUld.equals(expectedUld);
-
-        Log.d(
-            TAG,
-            "ULD match check: position="
-                + nearestCode
-                + " expected="
-                + expectedUld
-                + " detected="
-                + detectedUld
-                + " -> "
-                + (match ? "CORRECT" : "WRONG"));
 
         fresh.put(
             nearestCode,

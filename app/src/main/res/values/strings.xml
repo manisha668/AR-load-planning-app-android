@@ -32,4 +32,6 @@
     <item>Enable Instant Placement</item>
   </string-array>
 
+  <string translatable="false" name="load_sheet_preview_description">Preview of the uploaded load sheet document</string>
+
 </resources>

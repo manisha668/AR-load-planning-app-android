@@ -2,7 +2,6 @@ package com.google.ar.core.examples.java.helloar;
 
 import android.graphics.Rect;
 import android.graphics.RectF;
-import android.util.Log;
 
 import androidx.annotation.Nullable;
 
@@ -30,8 +29,6 @@ import java.util.regex.Pattern;
  */
 public final class LoadSheetInstructionParser {
   private LoadSheetInstructionParser() {}
-
-  private static final String TAG = "LoadSheetParser";
 
   // Position: 1–3 digits + L/R. Allow optional space/dash between digit and L/R (e.g. "7 R", "7R").
   private static final Pattern POSITION_PATTERN =
@@ -266,15 +263,8 @@ public final class LoadSheetInstructionParser {
         if (container == null || container.rect == null) continue;
         Token nearestPos = findNearest(container, positionTokens);
         if (nearestPos == null) {
-          Log.d(TAG, "OCR match - container " + container.text + " had no nearby position");
           continue;
         }
-        Log.d(
-            TAG,
-            "OCR match - container "
-                + container.text
-                + " matched to position "
-                + nearestPos.text);
         String key = container.text + "@" + nearestPos.text + "@" + byContainer.size();
         byContainer.put(key, new Instruction(container.text, nearestPos.text));
       }
@@ -285,7 +275,6 @@ public final class LoadSheetInstructionParser {
     // If OCR-based matching found nothing, or missed some, merge with text-only parsing
     // based on the concatenated OCR text.
     String rawText = mlkitText.getText();
-    Log.d(TAG, "OCR raw text: " + rawText);
     // If OCR already produced any AKE instructions, do not merge AKE instructions from text-only parsing.
     // The text-only parser lacks geometry and can incorrectly associate AKE tokens to nearby positions.
     boolean ocrHasAnyAkeInstruction = false;
@@ -324,8 +313,6 @@ public final class LoadSheetInstructionParser {
       }
     }
 
-    logTokens(positionTokens, containerTokens);
-    logInstructions("OCR/merged parse", result);
     return result;
   }
 
@@ -407,56 +394,7 @@ public final class LoadSheetInstructionParser {
     }
 
     List<Instruction> result = new ArrayList<>(byContainer.values());
-    logInstructions("Text parse", result);
     return result;
-  }
-
-  private static void logInstructions(String source, List<Instruction> instructions) {
-    if (instructions == null || instructions.isEmpty()) {
-      Log.d(TAG, source + " - no instructions parsed");
-      return;
-    }
-    StringBuilder sb = new StringBuilder();
-    sb.append(source).append(" - parsed instructions: ");
-    for (Instruction ins : instructions) {
-      if (ins == null) continue;
-      sb.append('[')
-          .append(ins.containerId)
-          .append(" -> ")
-          .append(ins.expectedPosition)
-          .append("] ");
-    }
-    Log.d(TAG, sb.toString());
-  }
-
-  private static void logTokens(List<Token> positionTokens, List<Token> containerTokens) {
-    StringBuilder positions = new StringBuilder("OCR positions: ");
-    for (Token t : positionTokens) {
-      if (t == null || t.rect == null) continue;
-      positions
-          .append('[')
-          .append(t.text)
-          .append(" x=")
-          .append(t.rect.centerX())
-          .append(" y=")
-          .append(t.rect.centerY())
-          .append("] ");
-    }
-    Log.d(TAG, positions.toString());
-
-    StringBuilder containers = new StringBuilder("OCR containers: ");
-    for (Token t : containerTokens) {
-      if (t == null || t.rect == null) continue;
-      containers
-          .append('[')
-          .append(t.text)
-          .append(" x=")
-          .append(t.rect.centerX())
-          .append(" y=")
-          .append(t.rect.centerY())
-          .append("] ");
-    }
-    Log.d(TAG, containers.toString());
   }
 
   private static final class Token {
@@ -564,19 +502,6 @@ public final class LoadSheetInstructionParser {
           String key = c.text + "@" + bestPos.text + "@" + usedPositions.size();
           out.put(key, new Instruction(c.text, bestPos.text));
         }
-      }
-    }
-
-    // Log matches for debugging.
-    for (Map.Entry<String, Instruction> e : out.entrySet()) {
-      Instruction ins = e.getValue();
-      if (ins != null) {
-        Log.d(
-            TAG,
-            "OCR match (columns) - container "
-                + ins.containerId
-                + " matched to position "
-                + ins.expectedPosition);
       }
     }
 

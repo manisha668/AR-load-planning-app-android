@@ -1,5 +1,6 @@
 package com.google.ar.core.examples.java.helloar;
 
+import android.content.ClipData;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -37,6 +38,9 @@ public class HomeActivity extends AppCompatActivity {
 
     private final ArrayList<String> loadedContainerIds = new ArrayList<>();
     private final ArrayList<String> loadedExpectedPositions = new ArrayList<>();
+    /** Last document opened for load sheet (shown again in AR screen). */
+    private Uri lastLoadSheetDocumentUri;
+    private String lastLoadSheetDocumentMime;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -70,8 +74,6 @@ public class HomeActivity extends AppCompatActivity {
         });
 
         btnARView.setOnClickListener(v -> {
-            Log.d("HOME", "Start Scan button clicked");
-
             if (loadedContainerIds.isEmpty() || loadedExpectedPositions.isEmpty()) {
                 Toast.makeText(this, "Upload a load sheet first", Toast.LENGTH_SHORT).show();
                 return;
@@ -80,11 +82,22 @@ public class HomeActivity extends AppCompatActivity {
             Intent intent = new Intent(this, BoardScanActivity.class);
             intent.putStringArrayListExtra("LOAD_CONTAINERS", loadedContainerIds);
             intent.putStringArrayListExtra("LOAD_POSITIONS", loadedExpectedPositions);
+            if (lastLoadSheetDocumentUri != null) {
+                intent.putExtra(BoardScanActivity.EXTRA_LOAD_SHEET_DOCUMENT_URI, lastLoadSheetDocumentUri.toString());
+                intent.setClipData(ClipData.newRawUri("load_sheet", lastLoadSheetDocumentUri));
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+            if (lastLoadSheetDocumentMime != null) {
+                intent.putExtra(BoardScanActivity.EXTRA_LOAD_SHEET_DOCUMENT_MIME, lastLoadSheetDocumentMime);
+            }
             startActivity(intent);
         });
     }
 
     private void importLoadSheet(Uri uri) {
+        lastLoadSheetDocumentUri = uri;
+        lastLoadSheetDocumentMime = getContentResolver().getType(uri);
+
         Toast.makeText(this, "Parsing load sheet…", Toast.LENGTH_SHORT).show();
 
         String mime = getContentResolver().getType(uri);
